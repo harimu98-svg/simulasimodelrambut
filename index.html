@@ -142,11 +142,11 @@ const STYLE_PROMPTS = {
   curly: "long voluminous curly hair"
 };
 
-// ⚠️ PENTING: URL ini HARUS mengarah ke function Netlify, BUKAN ke SenseNova
+// URL function Netlify — JANGAN diganti ke token.sensenova.ai
 const FUNCTION_URL = '/.netlify/functions/sensenova_proxy';
 
 let selectedStyle = null;
-let photoBase64 = null; // menyimpan full data URL: "data:image/png;base64,..."
+let photoBase64 = null;   // akan berisi "data:image/png;base64,..." yang dijamin cocok
 
 // Pilih gaya
 document.querySelectorAll('.style-opt').forEach(el => {
@@ -158,28 +158,40 @@ document.querySelectorAll('.style-opt').forEach(el => {
   });
 });
 
-// Upload & preview
+// Upload: konversi ke PNG via canvas agar MIME selalu cocok
 document.getElementById('photoInput').addEventListener('change', e => {
   const file = e.target.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = ev => {
-    // Simpan FULL data URL (dengan prefix data:image/...)
-    photoBase64 = ev.target.result;
+
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+
+    // Selalu ekspor sebagai PNG → MIME dijamin "image/png"
+    photoBase64 = canvas.toDataURL('image/png');
+
     const prev = document.getElementById('preview');
-    prev.src = ev.target.result;
+    prev.src = photoBase64;
     prev.style.display = 'block';
+
     checkReady();
+    URL.revokeObjectURL(img.src);
   };
-  reader.readAsDataURL(file);
+  img.onerror = () => {
+    alert('Gagal membaca file gambar.');
+  };
+  img.src = URL.createObjectURL(file);
 });
 
 function checkReady() {
-  // Tidak perlu cek API key lagi — sudah disimpan di server Netlify
   document.getElementById('simBtn').disabled = !(selectedStyle && photoBase64);
 }
 
-// Panggil function Netlify untuk satu sudut pandang
+// Panggil Netlify Function untuk satu sudut pandang
 async function generateAngle(anglePrompt) {
   const prompt = `Take the person in this photo and give them ${STYLE_PROMPTS[selectedStyle]}. ` +
                  `Keep the person's facial features, skin tone, and identity exactly the same. ` +
@@ -192,7 +204,7 @@ async function generateAngle(anglePrompt) {
       model: 'sensenova-u1.5-lite',
       prompt: prompt,
       images: [
-        { image_url: photoBase64 }   // sudah termasuk prefix data:image/...
+        { image_url: photoBase64 }   // "data:image/png;base64,..." yang valid
       ],
       size: '1024x1024',
       watermark: false,
@@ -208,7 +220,9 @@ async function generateAngle(anglePrompt) {
 
   const data = await res.json();
   const item = data.data?.[0];
-  if (!item) throw new Error('Response tidak berisi gambar. Raw: ' + JSON.stringify(data).slice(0, 200));
+  if (!item) {
+    throw new Error('Response tidak berisi gambar. Raw: ' + JSON.stringify(data).slice(0, 200));
+  }
   if (item.b64_json) return 'data:image/png;base64,' + item.b64_json;
   if (item.url) return item.url;
   throw new Error('Format response tidak dikenali: ' + JSON.stringify(item).slice(0, 200));
