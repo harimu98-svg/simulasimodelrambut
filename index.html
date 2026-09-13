@@ -61,25 +61,21 @@
   }
   button:disabled { background: #93b4f5; cursor: not-allowed; }
   #status { margin-top: 12px; font-size: 14px; color: #555; text-align: center; }
-  .results { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-  .result-item { text-align: center; }
-  .result-item img {
+  #resultImg {
     width: 100%;
     border-radius: 10px;
+    margin-top: 12px;
+    display: none;
     background: #eee;
-    min-height: 200px;
-    object-fit: cover;
   }
-  .result-item .cap { font-size: 13px; font-weight: 600; margin-top: 8px; color: #444; }
   .hidden { display: none; }
   .err { color: #dc2626; font-size: 13px; margin-top: 8px; word-break: break-all; white-space: pre-wrap; }
-  .usage { font-size: 12px; color: #888; margin-top: 8px; text-align: center; }
 </style>
 </head>
 <body>
 
 <h1>💇 Simulasi Model Rambut AI</h1>
-<p class="sub">Pilih gaya, upload selfie, lihat hasil dari 3 sudut.</p>
+<p class="sub">Pilih gaya, upload selfie, lihat hasil 3 sudut dalam 1 gambar.</p>
 
 <!-- PILIH GAYA -->
 <div class="card">
@@ -120,28 +116,18 @@
 <!-- HASIL -->
 <div class="card hidden" id="resultCard">
   <label>Hasil Simulasi</label>
-  <div class="results">
-    <div class="result-item">
-      <img id="resFront" alt="Tampak Depan">
-      <div class="cap">Tampak Depan</div>
-    </div>
-    <div class="result-item">
-      <img id="resSide" alt="Tampak Samping">
-      <div class="cap">Tampak Samping</div>
-    </div>
-    <div class="result-item">
-      <img id="resBack" alt="Tampak Belakang">
-      <div class="cap">Tampak Belakang</div>
-    </div>
-  </div>
+  <img id="resultImg" alt="Hasil Kolase">
+  <p style="font-size:13px; color:#666; margin-top:8px; text-align:center;">
+    Kiri: tampak depan · Kanan atas: tampak samping · Kanan bawah: tampak belakang
+  </p>
 </div>
 
 <script>
 // ==== KONFIGURASI ====
 const FUNCTION_URL = '/.netlify/functions/sensenova_proxy';
 const MAX_INPUT_SIZE = 768;        // px, perkecil gambar input
-const JPEG_QUALITY = 0.8;          // kualitas JPEG
-const OUTPUT_SIZE = '1024x1024';   // resolusi output
+const JPEG_QUALITY = 0.8;          // kualitas JPEG input
+const OUTPUT_SIZE = '2048x2048';   // resolusi output (lebih besar untuk kolase)
 
 const STYLE_PROMPTS = {
   bob: "a short chin-length bob haircut with straight bangs",
@@ -172,7 +158,6 @@ document.getElementById('photoInput').addEventListener('change', e => {
     let w = img.naturalWidth;
     let h = img.naturalHeight;
 
-    // Perkecil jika melebihi MAX_INPUT_SIZE
     if (w > MAX_INPUT_SIZE || h > MAX_INPUT_SIZE) {
       const r = Math.min(MAX_INPUT_SIZE / w, MAX_INPUT_SIZE / h);
       w = Math.round(w * r);
@@ -184,7 +169,6 @@ document.getElementById('photoInput').addEventListener('change', e => {
     canvas.height = h;
     canvas.getContext('2d').drawImage(img, 0, 0, w, h);
 
-    // JPEG → ukuran kecil, prefix cocok otomatis
     photoBase64 = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
 
     const prev = document.getElementById('preview');
@@ -202,11 +186,19 @@ function checkReady() {
   document.getElementById('simBtn').disabled = !(selectedStyle && photoBase64);
 }
 
-// ==== PANGGIL FUNCTION ====
-async function generateAngle(anglePrompt) {
-  const prompt = `Take the person in this photo and give them ${STYLE_PROMPTS[selectedStyle]}. ` +
-                 `Keep the person's facial features, skin tone, and identity exactly the same. ` +
-                 `Show the result as a realistic photograph, ${anglePrompt}.`;
+// ==== GENERATE KOLASE ====
+async function generateCollage() {
+  const styleDesc = STYLE_PROMPTS[selectedStyle];
+
+  const prompt =
+    `Create a single image containing a 3-panel collage of the SAME person with ${styleDesc}. ` +
+    `Keep the person's facial features, skin tone, and identity exactly the same across all panels. ` +
+    `Layout: ` +
+    `- LEFT HALF (full height): front view, facing the camera. ` +
+    `- TOP-RIGHT quarter: side profile view of the face. ` +
+    `- BOTTOM-RIGHT quarter: back view, showing the back of the head. ` +
+    `Separate the three panels with thin white lines. ` +
+    `Realistic photography style, consistent lighting and background across all panels.`;
 
   const res = await fetch(FUNCTION_URL, {
     method: 'POST',
@@ -221,7 +213,7 @@ async function generateAngle(anglePrompt) {
       watermark: false,
       output_format: 'jpeg',
       response_format: 'b64_json',
-      prompt_extend: false,   // MATIKAN → hemat token
+      prompt_extend: false,
       n: 1
     })
   });
@@ -248,25 +240,20 @@ document.getElementById('simBtn').addEventListener('click', async () => {
 
   btn.disabled = true;
   document.getElementById('resultCard').classList.remove('hidden');
+  status.textContent = 'Menghasilkan kolase 3 sudut...';
 
-  const angles = [
-    { prompt: 'viewed from the front, facing the camera', img: 'resFront', label: 'Depan' },
-    { prompt: 'viewed from the side profile, left side of the face', img: 'resSide', label: 'Samping' },
-    { prompt: 'viewed from behind, back of the head visible', img: 'resBack', label: 'Belakang' }
-  ];
-
-  for (const a of angles) {
-    status.textContent = `Menghasilkan tampak ${a.label}...`;
-    try {
-      const url = await generateAngle(a.prompt);
-      document.getElementById(a.img).src = url;
-    } catch (err) {
-      console.error(err);
-      errBox.textContent += `[${a.label}] ${err.message}\n\n`;
-    }
+  try {
+    const url = await generateCollage();
+    const img = document.getElementById('resultImg');
+    img.src = url;
+    img.style.display = 'block';
+    status.textContent = 'Selesai.';
+  } catch (err) {
+    console.error(err);
+    errBox.textContent = err.message;
+    status.textContent = 'Gagal.';
   }
 
-  status.textContent = 'Selesai.';
   btn.disabled = false;
 });
 </script>
