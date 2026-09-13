@@ -24,7 +24,7 @@
     box-shadow: 0 1px 3px rgba(0,0,0,.08);
   }
   label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 8px; }
-  input[type="password"], input[type="file"] {
+  input[type="file"] {
     width: 100%;
     padding: 10px;
     border: 1px solid #ddd;
@@ -72,19 +72,13 @@
   }
   .result-item .cap { font-size: 13px; font-weight: 600; margin-top: 8px; color: #444; }
   .hidden { display: none; }
-  .err { color: #dc2626; font-size: 13px; margin-top: 8px; word-break: break-all; }
+  .err { color: #dc2626; font-size: 13px; margin-top: 8px; word-break: break-all; white-space: pre-wrap; }
 </style>
 </head>
 <body>
 
 <h1>💇 Simulasi Model Rambut AI</h1>
 <p class="sub">Pilih gaya, upload selfie, lihat hasil dari 3 sudut.</p>
-
-<!-- API KEY -->
-<div class="card">
-  <label>API Key SenseNova</label>
-  <input type="password" id="apiKey" placeholder="sk-...">
-</div>
 
 <!-- PILIH GAYA -->
 <div class="card">
@@ -98,7 +92,7 @@
     <div class="style-opt" data-style="pixie">
       <span class="emoji">✂️</span>
       <div class="name">Pixie Cut</div>
-      <div class="desc">Sangat pendek, rapi, maskulin/feminin</div>
+      <div class="desc">Sangat pendek, rapi, stylish</div>
     </div>
     <div class="style-opt" data-style="curly">
       <span class="emoji">🌀</span>
@@ -148,8 +142,11 @@ const STYLE_PROMPTS = {
   curly: "long voluminous curly hair"
 };
 
+// ⚠️ PENTING: URL ini HARUS mengarah ke function Netlify, BUKAN ke SenseNova
+const FUNCTION_URL = '/.netlify/functions/sensenova_proxy';
+
 let selectedStyle = null;
-let photoBase64 = null;
+let photoBase64 = null; // menyimpan full data URL: "data:image/png;base64,..."
 
 // Pilih gaya
 document.querySelectorAll('.style-opt').forEach(el => {
@@ -167,7 +164,8 @@ document.getElementById('photoInput').addEventListener('change', e => {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = ev => {
-    photoBase64 = ev.target.result.split(',')[1]; // ambil base64 saja
+    // Simpan FULL data URL (dengan prefix data:image/...)
+    photoBase64 = ev.target.result;
     const prev = document.getElementById('preview');
     prev.src = ev.target.result;
     prev.style.display = 'block';
@@ -176,34 +174,29 @@ document.getElementById('photoInput').addEventListener('change', e => {
   reader.readAsDataURL(file);
 });
 
-document.getElementById('apiKey').addEventListener('input', checkReady);
-
 function checkReady() {
-  const hasKey = document.getElementById('apiKey').value.trim().startsWith('sk-');
-  document.getElementById('simBtn').disabled = !(hasKey && selectedStyle && photoBase64);
+  // Tidak perlu cek API key lagi — sudah disimpan di server Netlify
+  document.getElementById('simBtn').disabled = !(selectedStyle && photoBase64);
 }
 
-// Panggil API SenseNova untuk satu sudut pandang
+// Panggil function Netlify untuk satu sudut pandang
 async function generateAngle(anglePrompt) {
-  const apiKey = document.getElementById('apiKey').value.trim();
-
   const prompt = `Take the person in this photo and give them ${STYLE_PROMPTS[selectedStyle]}. ` +
                  `Keep the person's facial features, skin tone, and identity exactly the same. ` +
                  `Show the result as a realistic photograph, ${anglePrompt}.`;
 
-  // SenseNova image edit endpoint (kompatibel OpenAI)
-  const res = await fetch('https://token.sensenova.cn/v1/images/edits', {
+  const res = await fetch(FUNCTION_URL, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: 'sensenova-u1.5-lite',
       prompt: prompt,
-      image: photoBase64,       // base64 tanpa prefix
+      images: [
+        { image_url: photoBase64 }   // sudah termasuk prefix data:image/...
+      ],
       size: '1024x1024',
       watermark: false,
+      response_format: 'b64_json',
       n: 1
     })
   });
@@ -214,12 +207,11 @@ async function generateAngle(anglePrompt) {
   }
 
   const data = await res.json();
-  // Response format biasanya { data: [{ url: "..." }] } atau { data: [{ b64_json: "..." }] }
   const item = data.data?.[0];
-  if (!item) throw new Error('Response tidak berisi gambar.');
-  if (item.url) return item.url;
+  if (!item) throw new Error('Response tidak berisi gambar. Raw: ' + JSON.stringify(data).slice(0, 200));
   if (item.b64_json) return 'data:image/png;base64,' + item.b64_json;
-  throw new Error('Format response tidak dikenali.');
+  if (item.url) return item.url;
+  throw new Error('Format response tidak dikenali: ' + JSON.stringify(item).slice(0, 200));
 }
 
 // Tombol simulate
@@ -245,7 +237,7 @@ document.getElementById('simBtn').addEventListener('click', async () => {
       document.getElementById(a.img).src = url;
     } catch (err) {
       console.error(err);
-      errBox.textContent += `[${a.label}] ${err.message}\n`;
+      errBox.textContent += `[${a.label}] ${err.message}\n\n`;
     }
   }
 
