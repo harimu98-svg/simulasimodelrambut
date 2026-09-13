@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Simulasi Model Rambut AI</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 24px;
+    background: #f5f6f8;
+    color: #222;
+  }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .sub { color: #666; font-size: 14px; margin-bottom: 24px; }
+  .card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+  }
+  label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 8px; }
+  input[type="password"], input[type="file"] {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+  }
+  .styles { display: flex; gap: 12px; flex-wrap: wrap; }
+  .style-opt {
+    flex: 1;
+    min-width: 160px;
+    border: 2px solid #e0e0e0;
+    border-radius: 10px;
+    padding: 12px;
+    cursor: pointer;
+    text-align: center;
+    transition: all .15s;
+  }
+  .style-opt:hover { border-color: #bbb; }
+  .style-opt.selected { border-color: #2563eb; background: #eff6ff; }
+  .style-opt .emoji { font-size: 32px; display: block; margin-bottom: 6px; }
+  .style-opt .name { font-weight: 600; font-size: 14px; }
+  .style-opt .desc { font-size: 12px; color: #666; margin-top: 2px; }
+  #preview { max-width: 180px; border-radius: 10px; margin-top: 12px; display: none; }
+  button {
+    background: #2563eb;
+    color: #fff;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    width: 100%;
+  }
+  button:disabled { background: #93b4f5; cursor: not-allowed; }
+  #status { margin-top: 12px; font-size: 14px; color: #555; text-align: center; }
+  .results { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .result-item { text-align: center; }
+  .result-item img {
+    width: 100%;
+    border-radius: 10px;
+    background: #eee;
+    min-height: 200px;
+    object-fit: cover;
+  }
+  .result-item .cap { font-size: 13px; font-weight: 600; margin-top: 8px; color: #444; }
+  .hidden { display: none; }
+  .err { color: #dc2626; font-size: 13px; margin-top: 8px; word-break: break-all; }
+</style>
+</head>
+<body>
+
+<h1>💇 Simulasi Model Rambut AI</h1>
+<p class="sub">Pilih gaya, upload selfie, lihat hasil dari 3 sudut.</p>
+
+<!-- API KEY -->
+<div class="card">
+  <label>API Key SenseNova</label>
+  <input type="password" id="apiKey" placeholder="sk-...">
+</div>
+
+<!-- PILIH GAYA -->
+<div class="card">
+  <label>1. Pilih Model Rambut</label>
+  <div class="styles" id="styleList">
+    <div class="style-opt" data-style="bob">
+      <span class="emoji">💇‍♀️</span>
+      <div class="name">Bob Pendek</div>
+      <div class="desc">Potongan bob dengan poni, panjang dagu</div>
+    </div>
+    <div class="style-opt" data-style="pixie">
+      <span class="emoji">✂️</span>
+      <div class="name">Pixie Cut</div>
+      <div class="desc">Sangat pendek, rapi, maskulin/feminin</div>
+    </div>
+    <div class="style-opt" data-style="curly">
+      <span class="emoji">🌀</span>
+      <div class="name">Curly Long</div>
+      <div class="desc">Panjang bergelombang, volume alami</div>
+    </div>
+  </div>
+</div>
+
+<!-- UPLOAD -->
+<div class="card">
+  <label>2. Upload Foto Selfie</label>
+  <input type="file" id="photoInput" accept="image/*">
+  <img id="preview" alt="preview">
+</div>
+
+<!-- TOMBOL -->
+<div class="card">
+  <button id="simBtn" disabled>3. Simulasikan</button>
+  <div id="status"></div>
+  <div id="errorBox" class="err"></div>
+</div>
+
+<!-- HASIL -->
+<div class="card hidden" id="resultCard">
+  <label>Hasil Simulasi</label>
+  <div class="results">
+    <div class="result-item">
+      <img id="resFront" alt="Tampak Depan">
+      <div class="cap">Tampak Depan</div>
+    </div>
+    <div class="result-item">
+      <img id="resSide" alt="Tampak Samping">
+      <div class="cap">Tampak Samping</div>
+    </div>
+    <div class="result-item">
+      <img id="resBack" alt="Tampak Belakang">
+      <div class="cap">Tampak Belakang</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const STYLE_PROMPTS = {
+  bob: "a short chin-length bob haircut with straight bangs",
+  pixie: "a very short pixie cut, neat and stylish",
+  curly: "long voluminous curly hair"
+};
+
+let selectedStyle = null;
+let photoBase64 = null;
+
+// Pilih gaya
+document.querySelectorAll('.style-opt').forEach(el => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('.style-opt').forEach(x => x.classList.remove('selected'));
+    el.classList.add('selected');
+    selectedStyle = el.dataset.style;
+    checkReady();
+  });
+});
+
+// Upload & preview
+document.getElementById('photoInput').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    photoBase64 = ev.target.result.split(',')[1]; // ambil base64 saja
+    const prev = document.getElementById('preview');
+    prev.src = ev.target.result;
+    prev.style.display = 'block';
+    checkReady();
+  };
+  reader.readAsDataURL(file);
+});
+
+document.getElementById('apiKey').addEventListener('input', checkReady);
+
+function checkReady() {
+  const hasKey = document.getElementById('apiKey').value.trim().startsWith('sk-');
+  document.getElementById('simBtn').disabled = !(hasKey && selectedStyle && photoBase64);
+}
+
+// Panggil API SenseNova untuk satu sudut pandang
+async function generateAngle(anglePrompt) {
+  const apiKey = document.getElementById('apiKey').value.trim();
+
+  const prompt = `Take the person in this photo and give them ${STYLE_PROMPTS[selectedStyle]}. ` +
+                 `Keep the person's facial features, skin tone, and identity exactly the same. ` +
+                 `Show the result as a realistic photograph, ${anglePrompt}.`;
+
+  // SenseNova image edit endpoint (kompatibel OpenAI)
+  const res = await fetch('https://token.sensenova.cn/v1/images/edits', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: 'sensenova-u1.5-lite',
+      prompt: prompt,
+      image: photoBase64,       // base64 tanpa prefix
+      size: '1024x1024',
+      watermark: false,
+      n: 1
+    })
+  });
+
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`HTTP ${res.status}: ${txt}`);
+  }
+
+  const data = await res.json();
+  // Response format biasanya { data: [{ url: "..." }] } atau { data: [{ b64_json: "..." }] }
+  const item = data.data?.[0];
+  if (!item) throw new Error('Response tidak berisi gambar.');
+  if (item.url) return item.url;
+  if (item.b64_json) return 'data:image/png;base64,' + item.b64_json;
+  throw new Error('Format response tidak dikenali.');
+}
+
+// Tombol simulate
+document.getElementById('simBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('simBtn');
+  const status = document.getElementById('status');
+  const errBox = document.getElementById('errorBox');
+  errBox.textContent = '';
+
+  btn.disabled = true;
+  document.getElementById('resultCard').classList.remove('hidden');
+
+  const angles = [
+    { prompt: 'viewed from the front, facing the camera', img: 'resFront', label: 'Depan' },
+    { prompt: 'viewed from the side profile, left side of the face', img: 'resSide', label: 'Samping' },
+    { prompt: 'viewed from behind, back of the head visible', img: 'resBack', label: 'Belakang' }
+  ];
+
+  for (const a of angles) {
+    status.textContent = `Menghasilkan tampak ${a.label}...`;
+    try {
+      const url = await generateAngle(a.prompt);
+      document.getElementById(a.img).src = url;
+    } catch (err) {
+      console.error(err);
+      errBox.textContent += `[${a.label}] ${err.message}\n`;
+    }
+  }
+
+  status.textContent = 'Selesai.';
+  btn.disabled = false;
+});
+</script>
+</body>
+</html>
