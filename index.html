@@ -73,6 +73,7 @@
   .result-item .cap { font-size: 13px; font-weight: 600; margin-top: 8px; color: #444; }
   .hidden { display: none; }
   .err { color: #dc2626; font-size: 13px; margin-top: 8px; word-break: break-all; white-space: pre-wrap; }
+  .usage { font-size: 12px; color: #888; margin-top: 8px; text-align: center; }
 </style>
 </head>
 <body>
@@ -136,19 +137,22 @@
 </div>
 
 <script>
+// ==== KONFIGURASI ====
+const FUNCTION_URL = '/.netlify/functions/sensenova_proxy';
+const MAX_INPUT_SIZE = 768;        // px, perkecil gambar input
+const JPEG_QUALITY = 0.8;          // kualitas JPEG
+const OUTPUT_SIZE = '1024x1024';   // resolusi output
+
 const STYLE_PROMPTS = {
   bob: "a short chin-length bob haircut with straight bangs",
   pixie: "a very short pixie cut, neat and stylish",
   curly: "long voluminous curly hair"
 };
 
-// URL function Netlify — JANGAN diganti ke token.sensenova.ai
-const FUNCTION_URL = '/.netlify/functions/sensenova_proxy';
-
 let selectedStyle = null;
-let photoBase64 = null;   // akan berisi "data:image/png;base64,..." yang dijamin cocok
+let photoBase64 = null;
 
-// Pilih gaya
+// ==== PILIH GAYA ====
 document.querySelectorAll('.style-opt').forEach(el => {
   el.addEventListener('click', () => {
     document.querySelectorAll('.style-opt').forEach(x => x.classList.remove('selected'));
@@ -158,21 +162,30 @@ document.querySelectorAll('.style-opt').forEach(el => {
   });
 });
 
-// Upload: konversi ke PNG via canvas agar MIME selalu cocok
+// ==== UPLOAD + PERKECIL GAMBAR ====
 document.getElementById('photoInput').addEventListener('change', e => {
   const file = e.target.files[0];
   if (!file) return;
 
   const img = new Image();
   img.onload = () => {
-    const canvas = document.createElement('canvas');
-    canvas.width = img.naturalWidth;
-    canvas.height = img.naturalHeight;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0);
+    let w = img.naturalWidth;
+    let h = img.naturalHeight;
 
-    // Selalu ekspor sebagai PNG → MIME dijamin "image/png"
-    photoBase64 = canvas.toDataURL('image/png');
+    // Perkecil jika melebihi MAX_INPUT_SIZE
+    if (w > MAX_INPUT_SIZE || h > MAX_INPUT_SIZE) {
+      const r = Math.min(MAX_INPUT_SIZE / w, MAX_INPUT_SIZE / h);
+      w = Math.round(w * r);
+      h = Math.round(h * r);
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+
+    // JPEG → ukuran kecil, prefix cocok otomatis
+    photoBase64 = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
 
     const prev = document.getElementById('preview');
     prev.src = photoBase64;
@@ -181,9 +194,7 @@ document.getElementById('photoInput').addEventListener('change', e => {
     checkReady();
     URL.revokeObjectURL(img.src);
   };
-  img.onerror = () => {
-    alert('Gagal membaca file gambar.');
-  };
+  img.onerror = () => alert('Gagal membaca file gambar.');
   img.src = URL.createObjectURL(file);
 });
 
@@ -191,7 +202,7 @@ function checkReady() {
   document.getElementById('simBtn').disabled = !(selectedStyle && photoBase64);
 }
 
-// Panggil Netlify Function untuk satu sudut pandang
+// ==== PANGGIL FUNCTION ====
 async function generateAngle(anglePrompt) {
   const prompt = `Take the person in this photo and give them ${STYLE_PROMPTS[selectedStyle]}. ` +
                  `Keep the person's facial features, skin tone, and identity exactly the same. ` +
@@ -204,11 +215,13 @@ async function generateAngle(anglePrompt) {
       model: 'sensenova-u1.5-lite',
       prompt: prompt,
       images: [
-        { image_url: photoBase64 }   // "data:image/png;base64,..." yang valid
+        { image_url: photoBase64 }
       ],
-      size: '1024x1024',
+      size: OUTPUT_SIZE,
       watermark: false,
+      output_format: 'jpeg',
       response_format: 'b64_json',
+      prompt_extend: false,   // MATIKAN → hemat token
       n: 1
     })
   });
@@ -220,15 +233,13 @@ async function generateAngle(anglePrompt) {
 
   const data = await res.json();
   const item = data.data?.[0];
-  if (!item) {
-    throw new Error('Response tidak berisi gambar. Raw: ' + JSON.stringify(data).slice(0, 200));
-  }
-  if (item.b64_json) return 'data:image/png;base64,' + item.b64_json;
+  if (!item) throw new Error('Response tidak berisi gambar.');
+  if (item.b64_json) return 'data:image/jpeg;base64,' + item.b64_json;
   if (item.url) return item.url;
-  throw new Error('Format response tidak dikenali: ' + JSON.stringify(item).slice(0, 200));
+  throw new Error('Format response tidak dikenali.');
 }
 
-// Tombol simulate
+// ==== TOMBOL SIMULASI ====
 document.getElementById('simBtn').addEventListener('click', async () => {
   const btn = document.getElementById('simBtn');
   const status = document.getElementById('status');
