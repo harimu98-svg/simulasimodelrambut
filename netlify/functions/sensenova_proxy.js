@@ -18,7 +18,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const res = await fetch('https://token.sensenova.cn/v1/images/edits', {
+    const res = await fetch('https://token.sensenova.ai/v1/images/edits', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${API_KEY}`,
