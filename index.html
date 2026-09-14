@@ -74,7 +74,6 @@
     margin-top: 2px;
   }
 
-  /* Filter kategori */
   .filter-bar {
     display: flex;
     gap: 8px;
@@ -111,22 +110,111 @@
   }
   button.primary:disabled { background: #93b4f5; cursor: not-allowed; }
   #status { margin-top: 12px; font-size: 14px; color: #555; text-align: center; }
-  #resultImg {
-    width: 100%;
-    border-radius: 10px;
-    margin-top: 12px;
-    display: none;
-    background: #eee;
-  }
   .hidden { display: none; }
   .err { color: #dc2626; font-size: 13px; margin-top: 8px; word-break: break-all; white-space: pre-wrap; }
   .loading { color: #888; font-size: 14px; padding: 20px; text-align: center; }
+
+  /* ==== BEFORE/AFTER SLIDER ==== */
+  .ba-wrap {
+    position: relative;
+    width: 100%;
+    max-width: 600px;
+    margin: 16px auto 0;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #eee;
+    aspect-ratio: 1 / 1;
+    user-select: none;
+    touch-action: none;
+  }
+  .ba-wrap img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .ba-after {
+    clip-path: inset(0 0 0 50%);
+    transition: clip-path 0.1s linear;
+  }
+  .ba-wrap.animating .ba-after {
+    transition: clip-path 3s ease-in-out;
+  }
+  .ba-divider {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: #fff;
+    left: 50%;
+    transform: translateX(-50%);
+    box-shadow: 0 0 8px rgba(0,0,0,0.4);
+    pointer-events: none;
+  }
+  .ba-handle {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    cursor: grab;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: #333;
+    pointer-events: auto;
+  }
+  .ba-handle:active { cursor: grabbing; }
+  .ba-label {
+    position: absolute;
+    top: 12px;
+    padding: 4px 10px;
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 6px;
+    letter-spacing: 0.5px;
+  }
+  .ba-label.before { left: 12px; }
+  .ba-label.after { right: 12px; }
+  .ba-caption {
+    text-align: center;
+    font-size: 13px;
+    color: #666;
+    margin-top: 10px;
+  }
+  .ba-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+  .ba-actions button {
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: 1px solid #ddd;
+    background: #fff;
+    cursor: pointer;
+    font-size: 13px;
+    width: auto;
+  }
+  .ba-actions button:hover { border-color: #999; }
 </style>
 </head>
 <body>
 
 <h1>💇 Simulasi Model Rambut AI</h1>
-<p class="sub">Pilih gaya, upload selfie, lihat hasil 3 sudut dalam 1 gambar.</p>
+<p class="sub">Pilih gaya, upload selfie, lihat perbandingan sebelum &amp; sesudah.</p>
 
 <!-- PILIH GAYA -->
 <div class="card">
@@ -153,10 +241,24 @@
 <!-- HASIL -->
 <div class="card hidden" id="resultCard">
   <label>Hasil Simulasi</label>
-  <img id="resultImg" alt="Hasil Kolase">
-  <p style="font-size:13px; color:#666; margin-top:8px; text-align:center;">
-    Kiri: tampak depan · Kanan atas: 3/4 kanan · Kanan bawah: 3/4 kiri
-  </p>
+
+  <!-- Before/After Slider -->
+  <div class="ba-wrap" id="baWrap">
+    <img id="imgBefore" class="ba-before" alt="Sebelum">
+    <img id="imgAfter" class="ba-after" alt="Sesudah">
+    <div class="ba-label before">SEBELUM</div>
+    <div class="ba-label after">SESUDAH</div>
+    <div class="ba-divider" id="baDivider"></div>
+    <div class="ba-handle" id="baHandle">⇔</div>
+  </div>
+
+  <div class="ba-actions">
+    <button id="btnPlay">▶ Putar Animasi</button>
+    <button id="btnBefore">◀ Sebelum</button>
+    <button id="btnAfter">Sesudah ▶</button>
+  </div>
+
+  <p class="ba-caption">Geser handle untuk membandingkan sebelum &amp; sesudah.</p>
 </div>
 
 <script>
@@ -164,16 +266,17 @@
 const HAIRSTYLES_URL = '/.netlify/functions/get_hairstyles';
 const GENERATE_URL = '/.netlify/functions/sensenova_proxy';
 
-const OUTPUT_SIZE = '2048x2048';   // dari 4096x4096
-const MAX_INPUT_SIZE = 768;        // dari 1024
-const JPEG_QUALITY = 0.85;         // dari 0.9
+const MAX_INPUT_SIZE = 768;        // turun agar tidak timeout
+const JPEG_QUALITY = 0.85;
+const OUTPUT_SIZE = '2048x2048';   // aman di bawah 60s
 
 // ==== STATE ====
 let allHairstyles = [];
-let filteredHairstyles = [];
 let activeCategory = 'Semua';
 let selectedStyle = null;
 let photoBase64 = null;
+let beforeImage = null;   // data URL selfie asli
+let afterImage = null;    // data URL hasil AI
 
 // ==== LOAD MODEL RAMBUT ====
 async function loadHairstyles() {
@@ -182,12 +285,7 @@ async function loadHairstyles() {
 
   try {
     const res = await fetch(HAIRSTYLES_URL);
-
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(`HTTP ${res.status}: ${txt}`);
-    }
-
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
     allHairstyles = await res.json();
     loading.style.display = 'none';
 
@@ -197,7 +295,6 @@ async function loadHairstyles() {
       return;
     }
 
-    // Filter kategori
     const categories = ['Semua', ...new Set(allHairstyles.map(h => h.kategori).filter(Boolean))];
     const filterBar = document.getElementById('filterBar');
     filterBar.innerHTML = '';
@@ -225,17 +322,17 @@ function renderHairstyles() {
   const list = document.getElementById('styleList');
   list.innerHTML = '';
 
-  filteredHairstyles = activeCategory === 'Semua'
+  const filtered = activeCategory === 'Semua'
     ? allHairstyles
     : allHairstyles.filter(h => h.kategori === activeCategory);
 
-  filteredHairstyles.forEach(item => {
+  filtered.forEach(item => {
     const div = document.createElement('div');
     div.className = 'style-opt';
     div.dataset.id = item.nomor;
     div.innerHTML = `
       <img src="${item.link_url_bucket}" alt="${item.nama_model_rambut}" loading="lazy"
-           onerror="this.style.background='#ddd'; this.alt='Gagal load'">
+           onerror="this.style.background='#ddd'">
       <div class="name" title="${item.nama_model_rambut}">${item.nama_model_rambut}</div>
       <div class="cat">${item.kategori || ''}</div>
     `;
@@ -271,6 +368,7 @@ document.getElementById('photoInput').addEventListener('change', e => {
     canvas.getContext('2d').drawImage(img, 0, 0, w, h);
 
     photoBase64 = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
+    beforeImage = photoBase64;   // simpan untuk slider "sebelum"
 
     const prev = document.getElementById('preview');
     prev.src = photoBase64;
@@ -287,28 +385,15 @@ function checkReady() {
   document.getElementById('simBtn').disabled = !(selectedStyle && photoBase64);
 }
 
-// ==== GENERATE KOLASE 3/4 VIEW ====
-async function generateCollage() {
+// ==== GENERATE 1 SUDUT SAJA (tampak depan) ====
+async function generateOne() {
   const prompt =
     `Take the person in the FIRST image and apply the hairstyle shown in the SECOND image. ` +
     `Hairstyle name: ${selectedStyle.nama_model_rambut}. ` +
     `Description: ${selectedStyle.informasi || ''}. ` +
-    `\n\n` +
-    `CRITICAL: It must be the EXACT SAME person in all three panels — ` +
-    `same face shape, same facial features, same eyes, nose, mouth, eyebrows, ` +
-    `same skin tone, same eye color, same age. ` +
-    `Imagine the same person posing for three photos in a row. ` +
-    `\n\n` +
-    `Create a single 3-panel collage image: ` +
-    `- LEFT PANEL (full height): front view, face directly toward the camera. ` +
-    `- TOP-RIGHT panel: three-quarter view, head turned about 35 degrees to the right ` +
-    `(still showing most of the face, one ear visible). ` +
-    `- BOTTOM-RIGHT panel: three-quarter view, head turned about 35 degrees to the left ` +
-    `(still showing most of the face, one ear visible). ` +
-    `\n\n` +
-    `Separate panels with thin white lines. ` +
-    `Realistic photography, consistent lighting and background across all panels. ` +
-    `The hairstyle and the face must look identical across all three panels.`;
+    `Keep the person's face, facial features, skin tone, and identity exactly the same. ` +
+    `Front view, facing the camera directly. ` +
+    `Realistic photograph, natural lighting, same background as the original.`;
 
   const res = await fetch(GENERATE_URL, {
     method: 'POST',
@@ -342,6 +427,74 @@ async function generateCollage() {
   throw new Error('Format response tidak dikenali.');
 }
 
+// ==== BEFORE/AFTER SLIDER ====
+const baWrap = document.getElementById('baWrap');
+const imgBefore = document.getElementById('imgBefore');
+const imgAfter = document.getElementById('imgAfter');
+const baDivider = document.getElementById('baDivider');
+const baHandle = document.getElementById('baHandle');
+
+let sliderPos = 50;         // persen (0 = full after, 100 = full before)
+let isDragging = false;
+
+function setSlider(pct) {
+  sliderPos = Math.max(0, Math.min(100, pct));
+  // imgAfter di-clip: tampilkan bagian kanan (after) sebesar (100 - sliderPos)
+  // Slider di kiri → after terlihat dari kiri ke kanan
+  // Kita pakai clip-path inset(0 0 0 X%) → after tampil mulai dari X% ke kanan
+  imgAfter.style.clipPath = `inset(0 0 0 ${sliderPos}%)`;
+  baDivider.style.left = sliderPos + '%';
+  baHandle.style.left = sliderPos + '%';
+}
+
+// Init posisi tengah
+setSlider(50);
+
+// Drag dengan mouse
+baWrap.addEventListener('mousedown', e => {
+  isDragging = true;
+  baWrap.classList.remove('animating');
+  updateFromEvent(e);
+});
+window.addEventListener('mousemove', e => {
+  if (isDragging) updateFromEvent(e);
+});
+window.addEventListener('mouseup', () => { isDragging = false; });
+
+// Drag dengan sentuhan
+baWrap.addEventListener('touchstart', e => {
+  isDragging = true;
+  baWrap.classList.remove('animating');
+  updateFromEvent(e.touches[0]);
+}, { passive: true });
+window.addEventListener('touchmove', e => {
+  if (isDragging) updateFromEvent(e.touches[0]);
+}, { passive: true });
+window.addEventListener('touchend', () => { isDragging = false; });
+
+function updateFromEvent(e) {
+  const rect = baWrap.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const pct = (x / rect.width) * 100;
+  setSlider(pct);
+}
+
+// Tombol kontrol
+document.getElementById('btnBefore').addEventListener('click', () => {
+  baWrap.classList.add('animating');
+  setSlider(0);   // full "sebelum"
+});
+document.getElementById('btnAfter').addEventListener('click', () => {
+  baWrap.classList.add('animating');
+  setSlider(100); // full "sesudah"
+});
+document.getElementById('btnPlay').addEventListener('click', () => {
+  baWrap.classList.add('animating');
+  // Animasi: mulai dari before, geser ke after
+  setSlider(0);
+  setTimeout(() => setSlider(100), 50);
+});
+
 // ==== TOMBOL SIMULASI ====
 document.getElementById('simBtn').addEventListener('click', async () => {
   const btn = document.getElementById('simBtn');
@@ -351,13 +504,22 @@ document.getElementById('simBtn').addEventListener('click', async () => {
 
   btn.disabled = true;
   document.getElementById('resultCard').classList.remove('hidden');
-  status.textContent = 'Menghasilkan kolase 3 sudut...';
+  status.textContent = 'Menghasilkan gambar...';
 
   try {
-    const url = await generateCollage();
-    const img = document.getElementById('resultImg');
-    img.src = url;
-    img.style.display = 'block';
+    const url = await generateOne();
+    afterImage = url;
+
+    imgBefore.src = beforeImage;
+    imgAfter.src = afterImage;
+
+    // Setelah gambar load, jalankan animasi otomatis
+    imgAfter.onload = () => {
+      baWrap.classList.add('animating');
+      setSlider(0);
+      setTimeout(() => setSlider(100), 100);
+    };
+
     status.textContent = 'Selesai.';
   } catch (err) {
     console.error(err);
