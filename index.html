@@ -291,16 +291,19 @@ function checkReady() {
 // ==== GENERATE KOLASE ====
 async function generateCollage() {
   const prompt =
-    `Take the person in the FIRST image and apply the hairstyle shown in the SECOND image. ` +
-    `Hairstyle name: ${selectedStyle.nama_model_rambut}. ` +
-    `Description: ${selectedStyle.informasi || ''}. ` +
-    `Keep the person's facial features, skin tone, and identity exactly the same. ` +
-    `Create a 3-panel collage: ` +
-    `- LEFT HALF (full height): front view, facing the camera. ` +
-    `- TOP-RIGHT quarter: side profile view of the face. ` +
-    `- BOTTOM-RIGHT quarter: back view, showing the back of the head. ` +
-    `Separate the three panels with thin white lines. ` +
-    `Realistic photography style, consistent lighting across all panels.`;
+  `CRITICAL: The SAME person must appear in all three panels. ` +
+  `The face, facial features, skin tone, hair color, and identity must be IDENTICAL across all panels — ` +
+  `it is the same person viewed from three different angles. ` +
+  `\n\n` +
+  `Take the person in the FIRST image and apply the hairstyle shown in the SECOND image. ` +
+  `Hairstyle: ${selectedStyle.nama_model_rambut}. ` +
+  `\n\n` +
+  `Create a 3-panel collage: ` +
+  `- LEFT HALF: front view, facing camera (use the exact face from the first image). ` +
+  `- TOP-RIGHT: side profile view of the same person. ` +
+  `- BOTTOM-RIGHT: back view of the same person. ` +
+  `\n\n` +
+  `Realistic photo, consistent lighting, same background, same person.`;
 
   const res = await fetch(GENERATE_URL, {
     method: 'POST',
