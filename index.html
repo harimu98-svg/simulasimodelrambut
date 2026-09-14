@@ -155,19 +155,18 @@
   <label>Hasil Simulasi</label>
   <img id="resultImg" alt="Hasil Kolase">
   <p style="font-size:13px; color:#666; margin-top:8px; text-align:center;">
-    Kiri: tampak depan · Kanan atas: tampak samping · Kanan bawah: tampak belakang
+    Kiri: tampak depan · Kanan atas: 3/4 kanan · Kanan bawah: 3/4 kiri
   </p>
 </div>
 
 <script>
 // ==== KONFIGURASI ====
-// Semua request lewat Netlify Function — tidak ada API key di HTML
 const HAIRSTYLES_URL = '/.netlify/functions/get_hairstyles';
 const GENERATE_URL = '/.netlify/functions/sensenova_proxy';
 
-const MAX_INPUT_SIZE = 768;        // px, perkecil gambar input
-const JPEG_QUALITY = 0.8;          // kualitas JPEG input
-const OUTPUT_SIZE = '2048x2048';   // resolusi output kolase
+const MAX_INPUT_SIZE = 1024;       // px (naik dari 768, gratis karena flat points)
+const JPEG_QUALITY = 0.9;          // (naik dari 0.8)
+const OUTPUT_SIZE = '4096x4096';   // (naik dari 2048, panel lebih tajam)
 
 // ==== STATE ====
 let allHairstyles = [];
@@ -176,7 +175,7 @@ let activeCategory = 'Semua';
 let selectedStyle = null;
 let photoBase64 = null;
 
-// ==== LOAD MODEL RAMBUT DARI NETLIFY FUNCTION ====
+// ==== LOAD MODEL RAMBUT ====
 async function loadHairstyles() {
   const loading = document.getElementById('loadingStyles');
   const list = document.getElementById('styleList');
@@ -198,7 +197,7 @@ async function loadHairstyles() {
       return;
     }
 
-    // Buat filter kategori
+    // Filter kategori
     const categories = ['Semua', ...new Set(allHairstyles.map(h => h.kategori).filter(Boolean))];
     const filterBar = document.getElementById('filterBar');
     filterBar.innerHTML = '';
@@ -288,22 +287,28 @@ function checkReady() {
   document.getElementById('simBtn').disabled = !(selectedStyle && photoBase64);
 }
 
-// ==== GENERATE KOLASE ====
+// ==== GENERATE KOLASE 3/4 VIEW ====
 async function generateCollage() {
   const prompt =
-  `CRITICAL: The SAME person must appear in all three panels. ` +
-  `The face, facial features, skin tone, hair color, and identity must be IDENTICAL across all panels — ` +
-  `it is the same person viewed from three different angles. ` +
-  `\n\n` +
-  `Take the person in the FIRST image and apply the hairstyle shown in the SECOND image. ` +
-  `Hairstyle: ${selectedStyle.nama_model_rambut}. ` +
-  `\n\n` +
-  `Create a 3-panel collage: ` +
-  `- LEFT HALF: front view, facing camera (use the exact face from the first image). ` +
-  `- TOP-RIGHT: side profile view of the same person. ` +
-  `- BOTTOM-RIGHT: back view of the same person. ` +
-  `\n\n` +
-  `Realistic photo, consistent lighting, same background, same person.`;
+    `Take the person in the FIRST image and apply the hairstyle shown in the SECOND image. ` +
+    `Hairstyle name: ${selectedStyle.nama_model_rambut}. ` +
+    `Description: ${selectedStyle.informasi || ''}. ` +
+    `\n\n` +
+    `CRITICAL: It must be the EXACT SAME person in all three panels — ` +
+    `same face shape, same facial features, same eyes, nose, mouth, eyebrows, ` +
+    `same skin tone, same eye color, same age. ` +
+    `Imagine the same person posing for three photos in a row. ` +
+    `\n\n` +
+    `Create a single 3-panel collage image: ` +
+    `- LEFT PANEL (full height): front view, face directly toward the camera. ` +
+    `- TOP-RIGHT panel: three-quarter view, head turned about 35 degrees to the right ` +
+    `(still showing most of the face, one ear visible). ` +
+    `- BOTTOM-RIGHT panel: three-quarter view, head turned about 35 degrees to the left ` +
+    `(still showing most of the face, one ear visible). ` +
+    `\n\n` +
+    `Separate panels with thin white lines. ` +
+    `Realistic photography, consistent lighting and background across all panels. ` +
+    `The hairstyle and the face must look identical across all three panels.`;
 
   const res = await fetch(GENERATE_URL, {
     method: 'POST',
@@ -312,8 +317,8 @@ async function generateCollage() {
       model: 'sensenova-u1.5-lite',
       prompt: prompt,
       images: [
-        { image_url: photoBase64 },                    // 1. selfie user
-        { image_url: selectedStyle.link_url_bucket }   // 2. referensi rambut
+        { image_url: photoBase64 },
+        { image_url: selectedStyle.link_url_bucket }
       ],
       size: OUTPUT_SIZE,
       watermark: false,
