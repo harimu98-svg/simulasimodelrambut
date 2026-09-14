@@ -7,12 +7,11 @@ exports.handler = async (event) => {
     return {
       statusCode: 500,
       headers: { 'Access-Control-Allow-Origin': '*' },
-      body: JSON.stringify({ error: 'Supabase env belum diset.' })
+      body: JSON.stringify({ error: 'Supabase env belum diset di Netlify.' })
     };
   }
 
   try {
-    // Query tabel model_rambut via REST API Supabase
     const res = await fetch(
       `${SUPABASE_URL}/rest/v1/model_rambut?select=*&order=nomor.asc`,
       {
@@ -30,7 +29,7 @@ exports.handler = async (event) => {
       headers: {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'public, max-age=3600'  // cache 1 jam
+        'Cache-Control': 'public, max-age=3600'
       },
       body: text
     };
