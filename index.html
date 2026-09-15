@@ -110,7 +110,7 @@
   }
   button.primary:disabled { background: #93b4f5; cursor: not-allowed; }
   #status { margin-top: 12px; font-size: 14px; color: #555; text-align: center; }
-  .hidden { display: none; }
+  .hidden { display: none !important; }
   .err { color: #dc2626; font-size: 13px; margin-top: 8px; word-break: break-all; white-space: pre-wrap; }
   .loading { color: #888; font-size: 14px; padding: 20px; text-align: center; }
 
@@ -160,9 +160,9 @@
     object-fit: cover;
     display: block;
   }
-  /* imgAfter di-clip dari KIRI.
-     Saat slider di 0% → clip dari 0% → after full terlihat
-     Saat slider di 100% → clip dari 100% → after tidak terlihat (before full) */
+  /* Slider posisi:
+     - 0   → after full (sesudah)
+     - 100 → before full (sebelum) */
   .ba-after {
     clip-path: inset(0 0 0 100%);
   }
@@ -258,13 +258,11 @@
 <div class="card hidden" id="resultCard">
   <label>Hasil Simulasi</label>
 
-  <!-- Loading spinner -->
   <div class="spinner-wrap hidden" id="spinnerWrap">
     <div class="spinner"></div>
     <div class="spinner-text">Memproses gambar...</div>
   </div>
 
-  <!-- Before/After Slider -->
   <div class="ba-wrap hidden" id="baWrap">
     <img id="imgBefore" class="ba-before" alt="Sebelum">
     <img id="imgAfter" class="ba-after" alt="Sesudah">
@@ -274,7 +272,7 @@
     <div class="ba-handle" id="baHandle">⇔</div>
   </div>
 
-  <p class="ba-caption hidden" id="baCaption">Geser handle ke kanan untuk melihat hasil sesudah.</p>
+  <p class="ba-caption hidden" id="baCaption">Geser handle ke kiri untuk melihat hasil sesudah.</p>
 </div>
 
 <script>
@@ -290,29 +288,27 @@ const OUTPUT_SIZE = '2048x2048';
 let allHairstyles = [];
 let activeCategory = 'Semua';
 let selectedStyle = null;
-let photoBase64 = null;      // untuk dikirim ke AI
-let beforeImage = null;      // untuk ditampilkan sebagai "sebelum" (sudah dinormalisasi)
+let photoBase64 = null;
+let beforeImage = null;
 let afterImage = null;
 
-// ==== NORMALISASI GAMBAR KE RASIO 1:1 ====
-// Supaya ukuran wajah sebelum & sesudah sama saat ditampilkan
+// ==== NORMALISASI GAMBAR KE 1:1 ====
 function normalizeToSquare(dataUrl) {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
       const size = Math.min(img.naturalWidth, img.naturalHeight);
-      // Crop tengah jadi persegi
       const sx = (img.naturalWidth - size) / 2;
       const sy = (img.naturalHeight - size) / 2;
 
       const canvas = document.createElement('canvas');
-      canvas.width = 800;   // ukuran tampilan standar
+      canvas.width = 800;
       canvas.height = 800;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, sx, sy, size, size, 0, 0, 800, 800);
-
       resolve(canvas.toDataURL('image/jpeg', 0.9));
     };
+    img.onerror = reject;
     img.src = dataUrl;
   });
 }
@@ -320,7 +316,6 @@ function normalizeToSquare(dataUrl) {
 // ==== LOAD MODEL RAMBUT ====
 async function loadHairstyles() {
   const loading = document.getElementById('loadingStyles');
-  const list = document.getElementById('styleList');
 
   try {
     const res = await fetch(HAIRSTYLES_URL);
@@ -386,7 +381,7 @@ function renderHairstyles() {
 }
 
 // ==== UPLOAD + PERKECIL GAMBAR ====
-document.getElementById('photoInput').addEventListener('change', async e => {
+document.getElementById('photoInput').addEventListener('change', e => {
   const file = e.target.files[0];
   if (!file) return;
 
@@ -407,7 +402,6 @@ document.getElementById('photoInput').addEventListener('change', async e => {
     canvas.getContext('2d').drawImage(img, 0, 0, w, h);
 
     photoBase64 = canvas.toDataURL('image/jpeg', JPEG_QUALITY);
-    // Normalisasi ke 1:1 untuk tampilan "sebelum"
     beforeImage = await normalizeToSquare(photoBase64);
 
     const prev = document.getElementById('preview');
@@ -431,9 +425,16 @@ async function generateOne() {
     `Take the person in the FIRST image and apply the hairstyle shown in the SECOND image. ` +
     `Hairstyle name: ${selectedStyle.nama_model_rambut}. ` +
     `Description: ${selectedStyle.informasi || ''}. ` +
-    `Keep the person's face, facial features, skin tone, and identity exactly the same. ` +
-    `Front view, facing the camera directly, centered composition, square 1:1 aspect ratio. ` +
-    `Realistic photograph, natural lighting, same background as the original.`;
+    `\n\n` +
+    `CRITICAL REQUIREMENTS: ` +
+    `- Keep the EXACT SAME camera framing, zoom level, and head position as the original photo. ` +
+    `- Do NOT zoom in or zoom out. ` +
+    `- Do NOT crop or reframe the photo. ` +
+    `- Keep the face at the EXACT same size and position in the frame. ` +
+    `- Keep the exact same background, same lighting, same head angle. ` +
+    `- Only change the hairstyle — everything else must remain identical. ` +
+    `\n\n` +
+    `Realistic photograph, front view, facing the camera directly, square 1:1 aspect ratio.`;
 
   const res = await fetch(GENERATE_URL, {
     method: 'POST',
@@ -454,11 +455,7 @@ async function generateOne() {
     })
   });
 
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new Error(`HTTP ${res.status}: ${txt}`);
-  }
-
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
   const data = await res.json();
   const item = data.data?.[0];
   if (!item) throw new Error('Response tidak berisi gambar.');
@@ -474,10 +471,7 @@ const imgAfter = document.getElementById('imgAfter');
 const baDivider = document.getElementById('baDivider');
 const baHandle = document.getElementById('baHandle');
 
-// sliderPos: 0 = tampil SESUDAH penuh, 100 = tampil SEBELUM penuh
-// Karena imgAfter di-clip dari kiri (inset kiri), jadi:
-// - sliderPos = 0   → clip-path: inset(0 0 0 0%) → after full
-// - sliderPos = 100 → clip-path: inset(0 0 0 100%) → after hilang, before full
+// sliderPos: 0 = SESUDAH full, 100 = SEBELUM full
 let sliderPos = 100;
 let isDragging = false;
 
@@ -488,10 +482,9 @@ function setSlider(pct) {
   baHandle.style.left = sliderPos + '%';
 }
 
-// Init: posisi full "sebelum" (slider di kanan)
 setSlider(100);
 
-// Drag dengan mouse
+// Mouse
 baWrap.addEventListener('mousedown', e => {
   isDragging = true;
   baWrap.classList.remove('animating');
@@ -502,7 +495,7 @@ window.addEventListener('mousemove', e => {
 });
 window.addEventListener('mouseup', () => { isDragging = false; });
 
-// Drag dengan sentuhan
+// Touch
 baWrap.addEventListener('touchstart', e => {
   isDragging = true;
   baWrap.classList.remove('animating');
@@ -516,9 +509,8 @@ window.addEventListener('touchend', () => { isDragging = false; });
 function updateFromEvent(e) {
   const rect = baWrap.getBoundingClientRect();
   const x = e.clientX - rect.left;
-  // Swipe ke KANAN → tampil SESUDAH (slider mendekati 0)
-  // Jadi kita balik: pct = (1 - x/width) * 100
-  const pct = (1 - x / rect.width) * 100;
+  // Swipe ke kiri → tampil SESUDAH (slider ke 0)
+  const pct = (x / rect.width) * 100;
   setSlider(pct);
 }
 
@@ -534,34 +526,47 @@ document.getElementById('simBtn').addEventListener('click', async () => {
   errBox.textContent = '';
   btn.disabled = true;
 
-  // Reset UI hasil
+  // Reset UI
   resultCard.classList.remove('hidden');
   baWrap.classList.add('hidden');
   baWrap.classList.remove('animating');
   caption.classList.add('hidden');
   spinner.classList.remove('hidden');
+  imgBefore.removeAttribute('src');
+  imgAfter.removeAttribute('src');
 
   try {
+    // 1. Generate
     const url = await generateOne();
-    // Normalisasi hasil AI ke 1:1 juga, supaya ukuran wajah konsisten
     afterImage = await normalizeToSquare(url);
 
-    imgBefore.src = beforeImage;
-    imgAfter.src = afterImage;
+    // 2. Set src dan tunggu kedua gambar load
+    await new Promise((resolve) => {
+      let loaded = 0;
+      const done = () => { if (++loaded === 2) resolve(); };
+      imgBefore.onload = done;
+      imgAfter.onload = done;
+      imgBefore.onerror = done;
+      imgAfter.onerror = done;
+      imgBefore.src = beforeImage;
+      imgAfter.src = afterImage;
+    });
 
-    // Sembunyikan spinner, tampilkan slider
+    // 3. Sembunyikan spinner, tampilkan slider
     spinner.classList.add('hidden');
     baWrap.classList.remove('hidden');
     caption.classList.remove('hidden');
 
-    // Set posisi awal: full SEBELUM (slider kanan)
+    // 4. Set posisi awal (SEBELUM penuh, handle di kanan)
+    baWrap.classList.remove('animating');
     setSlider(100);
 
-    // Tunggu gambar benar-benar ter-render, lalu animasi smooth
-    await new Promise(r => setTimeout(r, 400));
+    // 5. Force reflow agar transition siap
+    void baWrap.offsetWidth;
 
+    // 6. Aktifkan animasi, geser ke SESUDAH
+    await new Promise(r => setTimeout(r, 200));
     baWrap.classList.add('animating');
-    // Animasi: dari before (100) → after (0), 2.5 detik
     requestAnimationFrame(() => {
       setSlider(0);
     });
